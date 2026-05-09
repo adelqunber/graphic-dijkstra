@@ -1,200 +1,149 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <limits.h>
-#include <math.h>
-#include "raylib.h"
+#include "graph.h"
+#include "dijkstra.h"
 
-#define MAX 100
-#define WIDTH 1000
-#define HEIGHT 700
+static int read_graph_file(
+    const char* filename,
+    Graph** out_graph,
+    int* out_src,
+    int* out_dst
+) {
+    FILE* file = fopen(filename, "r");
 
-typedef struct Node {
-    int dest;
-    int weight;
-    struct Node* next;
-} Node;
+    if (file == NULL) {
+        fprintf(stderr, "Error: could not open file\n");
+        return 0;
+    }
 
-typedef struct {
-    Node* head[MAX];
-    int numVertices;
-} Graph;
+    int n, m;
 
-// ===== GRAPH =====
-Node* createNode(int dest, int weight) {
-    Node* n = malloc(sizeof(Node));
-    n->dest = dest;
-    n->weight = weight;
-    n->next = NULL;
-    return n;
-}
+    if (fscanf(file, "%d %d", &n, &m) != 2) {
+        fprintf(stderr, "Error: invalid file format\n");
+        fclose(file);
+        return 0;
+    }
 
-Graph* createGraph(int v) {
-    Graph* g = malloc(sizeof(Graph));
-    g->numVertices = v;
-    for (int i = 0; i < v; i++) g->head[i] = NULL;
-    return g;
-}
+    if (n < 0 || m < 0) {
+        fprintf(stderr, "Invalid input: negative numbers are not allowed\n");
+        fclose(file);
+        return 0;
+    }
 
-void addEdge(Graph* g, int src, int dest, int w) {
-    Node* n = createNode(dest, w);
-    n->next = g->head[src];
-    g->head[src] = n;
-}
+    if (n == 0) {
+        fprintf(stderr, "Error: number of nodes must be positive\n");
+        fclose(file);
+        return 0;
+    }
 
-// ===== DIJKSTRA =====
-int minDistance(int dist[], int vis[], int V) {
-    int min = INT_MAX, idx = -1;
-    for (int i = 0; i < V; i++) {
-        if (!vis[i] && dist[i] < min) {
-            min = dist[i];
-            idx = i;
+    Graph* graph = create_graph(n);
+
+    if (graph == NULL) {
+        fprintf(stderr, "Error: memory allocation failed\n");
+        fclose(file);
+        return 0;
+    }
+
+    for (int i = 0; i < m; i++) {
+        int src, dst, weight;
+
+        if (fscanf(file, "%d %d %d", &src, &dst, &weight) != 3) {
+            fprintf(stderr, "Error: invalid edge format\n");
+            free_graph(graph);
+            fclose(file);
+            return 0;
+        }
+
+        if (src < 0 || dst < 0 || weight < 0) {
+            fprintf(stderr, "Invalid input: negative numbers are not allowed\n");
+            free_graph(graph);
+            fclose(file);
+            return 0;
+        }
+
+        if (src >= n || dst >= n) {
+            fprintf(stderr, "Error: node index out of range\n");
+            free_graph(graph);
+            fclose(file);
+            return 0;
+        }
+
+        if (!add_edge(graph, src, dst, weight)) {
+            fprintf(stderr, "Error: failed to add edge\n");
+            free_graph(graph);
+            fclose(file);
+            return 0;
         }
     }
-    return idx;
-}
 
-void dijkstra(Graph* g, int src, int dest, int parent[]) {
-    int V = g->numVertices;
-    int dist[MAX], vis[MAX];
+    int query_src, query_dst;
 
-    for (int i = 0; i < V; i++) {
-        dist[i] = INT_MAX;
-        vis[i] = 0;
-        parent[i] = -1;
+    if (fscanf(file, "%d %d", &query_src, &query_dst) != 2) {
+        fprintf(stderr, "Error: missing Dijkstra source and destination\n");
+        free_graph(graph);
+        fclose(file);
+        return 0;
     }
 
-    dist[src] = 0;
-
-    for (int i = 0; i < V - 1; i++) {
-        int u = minDistance(dist, vis, V);
-        if (u == -1) break;
-        vis[u] = 1;
-
-        Node* temp = g->head[u];
-        while (temp) {
-            int v = temp->dest;
-            if (!vis[v] && dist[u] + temp->weight < dist[v]) {
-                dist[v] = dist[u] + temp->weight;
-                parent[v] = u;
-            }
-            temp = temp->next;
-        }
+    if (query_src < 0 || query_dst < 0) {
+        fprintf(stderr, "Invalid input: negative numbers are not allowed\n");
+        free_graph(graph);
+        fclose(file);
+        return 0;
     }
+
+    if (query_src >= n || query_dst >= n) {
+        fprintf(stderr, "Error: source or destination out of range\n");
+        free_graph(graph);
+        fclose(file);
+        return 0;
+    }
+
+    fclose(file);
+
+    *out_graph = graph;
+    *out_src = query_src;
+    *out_dst = query_dst;
+
+    return 1;
 }
 
-// ===== PATH CHECK =====
-int isPathEdge(int parent[], int u, int v) {
-    return parent[v] == u;
-}
-
-// ===== DRAW ARROW =====
-void DrawArrow(Vector2 start, Vector2 end, Color color) {
-    DrawLineEx(start, end, 2, color);
-
-    float angle = atan2f(end.y - start.y, end.x - start.x);
-
-    float arrowSize = 10;
-
-    Vector2 left = {
-        end.x - arrowSize * cosf(angle - 0.3f),
-        end.y - arrowSize * sinf(angle - 0.3f)
-    };
-
-    Vector2 right = {
-        end.x - arrowSize * cosf(angle + 0.3f),
-        end.y - arrowSize * sinf(angle + 0.3f)
-    };
-
-    DrawTriangle(end, left, right, color);
-}
-
-// ===== MAIN =====
-int main() {
-    FILE* f = fopen("ex2.txt", "r");
-    if (!f) {
-        printf("File error\n");
+int main(int argc, char* argv[]) {
+    if (argc != 2) {
+        fprintf(stderr, "Usage: %s <input_file>\n", argv[0]);
         return 1;
     }
 
-    int N, M;
-    fscanf(f, "%d %d", &N, &M);
+    Graph* graph = NULL;
+    int src, dst;
 
-    Graph* g = createGraph(N);
-
-    for (int i = 0; i < M; i++) {
-        int s, d, w;
-        fscanf(f, "%d %d %d", &s, &d, &w);
-        if (w < 0) {
-            printf("Negative weight error\n");
-            return 1;
-        }
-        addEdge(g, s, d, w);
+    if (!read_graph_file(argv[1], &graph, &src, &dst)) {
+        return 1;
     }
 
-    int src, dest;
-    fscanf(f, "%d %d", &src, &dest);
-    fclose(f);
+    int* path = NULL;
+    int path_length = 0;
+    long long total_weight = 0;
 
-    int parent[MAX];
-    dijkstra(g, src, dest, parent);
+    int result = dijkstra(graph, src, dst, &path, &path_length, &total_weight);
 
-    // ===== NODE POSITIONS (circle layout) =====
-    Vector2 pos[MAX];
-    float radius = 250;
-    Vector2 center = {WIDTH/2, HEIGHT/2};
-
-    for (int i = 0; i < N; i++) {
-        float angle = 2 * PI * i / N;
-        pos[i].x = center.x + radius * cosf(angle);
-        pos[i].y = center.y + radius * sinf(angle);
+    if (result == -1) {
+        fprintf(stderr, "Error: Dijkstra failed\n");
+        free_graph(graph);
+        return 1;
     }
 
-    // ===== RAYLIB WINDOW =====
-    InitWindow(WIDTH, HEIGHT, "Graph Visualization");
-    SetTargetFPS(60);
-
-    while (!WindowShouldClose()) {
-        BeginDrawing();
-        ClearBackground(RAYWHITE);
-
-        // DRAW EDGES
-        for (int u = 0; u < N; u++) {
-            Node* temp = g->head[u];
-            while (temp) {
-                int v = temp->dest;
-
-                Color color = isPathEdge(parent, u, v) ? RED : GRAY;
-
-                DrawArrow(pos[u], pos[v], color);
-
-                // weight text
-                Vector2 mid = {
-                    (pos[u].x + pos[v].x)/2,
-                    (pos[u].y + pos[v].y)/2
-                };
-
-                char wStr[10];
-                sprintf(wStr, "%d", temp->weight);
-                DrawText(wStr, mid.x, mid.y, 20, BLACK);
-
-                temp = temp->next;
-            }
-        }
-
-        // DRAW NODES
-        for (int i = 0; i < N; i++) {
-            DrawCircleV(pos[i], 20, SKYBLUE);
-
-            char id[10];
-            sprintf(id, "%d", i);
-            DrawText(id, pos[i].x - 5, pos[i].y - 5, 20, BLACK);
-        }
-
-        DrawText("Red = shortest path", 20, 20, 20, RED);
-
-        EndDrawing();
+    if (result == 0) {
+        printf("No path found\n");
+        free_graph(graph);
+        return 0;
     }
 
-    CloseWindow();
+    print_path(path, path_length);
+    printf("%lld\n", total_weight);
+
+    free(path);
+    free_graph(graph);
+
     return 0;
 }
