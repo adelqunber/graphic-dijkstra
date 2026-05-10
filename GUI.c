@@ -4,6 +4,8 @@
 #include <math.h>
 #include <stddef.h>
 
+// GUI for Milestone2 and Milestone3
+
 #define SCREEN_WIDTH 1000
 #define SCREEN_HEIGHT 700
 
